@@ -1,0 +1,1668 @@
+{
+  "$comment": "Reverse-engineered from rtumdfsample.exe (Realtek RTD1295 USB MP Tool). SHA256 of analyzed EXE: c29ba32b5ce1e5d0393bab777fe39d8405161e871dd0c2cf1766ee74f18a0bd0",
+  "tool": {
+    "name": "Realtek USB MP Tool (rtumdfsample.exe)",
+    "target_soc": "Realtek RTD129x (RTD1295 / RTD1195 family)",
+    "pe": {
+      "machine": "i386",
+      "image_base": "0x400000",
+      "subsystem": "GUI",
+      "linker": "MSVC 11.0 (VS2012)",
+      "mfc": "statically linked MFC"
+    },
+    "pdb": {
+      "guid": "18e2c3bffc28d145ac12305158217c32",
+      "age": 15,
+      "source_root": "d:\\chenchieh\\Desktop\\mp_tool\\usb_mp_tool\\trunk\\rtumdfsample"
+    }
+  },
+  "device": {
+    "usb_vid_pid": "VID_0bda & PID_1195",
+    "enumeration": "SetupDiGetClassDevsA(GUID_DEVINTERFACE_RTUMDFDRV, DIGCF_PRESENT|DIGCF_DEVICEINTERFACE)",
+    "device_interface_guid": "{7B56A5D6-CD10-4410-9F59-9A5E71269882}",
+    "driver_class_guid": "{23FA4AD3-B0C4-40C8-BDDA-28F67F2E70CA}",
+    "driver": "rtumdfdrv (User-Mode Driver Framework, WinUSB-style bulk pipe)",
+    "device_path_example": "\\\\?\\usb#vid_0bda&pid_1195#0357802115946#{7b56a5d6-cd10-4410-9f59-9a5e71269882}",
+    "open": "CreateFileA(path, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL)",
+    "io": "plain WriteFile/ReadFile on the device handle + FlushFileBuffers after each WriteFile; no DeviceIoControl in the burn path"
+  },
+  "transport": {
+    "model": "USB Mass-Storage-like CBW/CSW framing over a vendor bulk pipe (NOT real SCSI; custom opcodes 0xF1..0xFB)",
+    "write_alignment": "union { DWORD dCBWDataTransferLength; struct { BYTE _pad; BYTE opCode; BYTE type; BYTE _pad2; } } ; iIndicator uses the byte at +1 (+2 holds the sub-command 'type')",
+    "constants": {
+      "CBW_SIGNATURE": "0x43425355 (little-endian bytes 'USBC')",
+      "CBW_TAG": "0x12345678",
+      "CBW_FLAGS_READ": "0x80",
+      "CSW_SIGNATURE": "0x53425355 (little-endian bytes 'USBS')",
+      "CSW_TAG": "0x12345678",
+      "CBW_LENGTH": 31,
+      "CSW_LENGTH": 50,
+      "CSW_TAG_OFFSET": 21,
+      "CSW_STATUS_OFFSET": 13,
+      "CBW_SENSE_OPCODE": "0x2B (read CSW / status poll)",
+      "DRIVER_MAX_XFER": "0x20000 (128 KiB) per USB request on driver side",
+      "CBW_FRAME_LENGTH": 43,
+      "CBWCB_OFFSET": 15,
+      "CBWCB_LENGTH": 28,
+      "CSW_FRAME_LENGTH": 50,
+      "SENSE_CBW_LENGTH_FIELD": 5
+    },
+    "iIndicator_map": {
+      "0": "continuation (mid-buffer chunk)",
+      "1": "first chunk of buffer",
+      "2": "CSW status byte value BUSY",
+      "3": "last chunk of buffer"
+    },
+    "csw_status_enum": {
+      "0": "CSW_STAT_PASS",
+      "1": "CSW_STAT_FAIL -> retry",
+      "2": "CSW_STAT_BUSY -> keep polling",
+      "3": "CSW_STAT_WFAIL -> bad block during NAND write, remap",
+      "4": "CSW_STAT_WKEYFAIL",
+      "5": "CSW_STAT_WKEYPASS",
+      "6": "CSW_STAT_RKEYFAIL"
+    },
+    "csw_sense": [
+      {
+        "code": "0x00",
+        "meaning": "FPGA_BUSY (device still working)"
+      },
+      {
+        "code": "0x01",
+        "meaning": "PASS"
+      },
+      {
+        "code": "0x02",
+        "meaning": "FAIL"
+      },
+      {
+        "code": "0x09",
+        "meaning": "READ_SPARE"
+      },
+      {
+        "code": "0x20",
+        "meaning": "F_COPY_WRITE_TIME (generic STG flag reused as page/mode flag)"
+      }
+    ],
+    "handshake_sequence": [
+      "Sense/poll step: write 43-byte CBW{sig,tag,dataLen=5,flags=0,iInd=0,op,len=0x1C} + 5 raw channel bytes, then read 50-byte CSW; status 2 = BUSY, keep polling",
+      "Write 43-byte CBW{sig,tag,dataLen,flags,iIndicator,op,len=28,CBWCB[28]}",
+      "Write payload (dataLen bytes)",
+      "Read 50-byte CSW; verify [0..3]=='USBS' and [4..7]==0x12345678; status at [13]",
+      "retry up to 200 times, 200 ms sleep, 20 s timeout; PASS when status==0"
+    ],
+    "frame_layout": {
+      "0x00": "dCBWSignature = 0x43425355 ('USBC')",
+      "0x04": "dCBWTag = 0x12345678",
+      "0x08": "dCBWDataTransferLength (payload bytes for this chunk)",
+      "0x0C": "bmCBWFlags (0x80 = read direction, 0x00 = write direction)",
+      "0x0D": "iIndicator ((param16&3 | param17<<2)<<4 | spare nibble): 1=first, 0=middle, 3=last chunk",
+      "0x0E": "bCBWCBLength = 28 (0x1C)",
+      "0x0F": "CBWCB[28] (PDB-confirmed struct _CBWCB)",
+      "total": 43
+    },
+    "csw_layout": {
+      "0x00": "dCSWSignature = 0x53425355 ('USBS')",
+      "0x04": "dCSWTag = 0x12345678",
+      "0x08": "dCSWDataResidue / sense area",
+      "0x0D": "bCSWStatus (CSW_STAT_* enum, PDB address map)",
+      "total": 50,
+      "note": "bCSWStatus was proven at CSW+13 from the 32-bit load at 0x405f7a (ebp-0x9c+13 = ebp-0x8f)"
+    }
+  },
+  "cbwcb": {
+    "size": 28,
+    "layout": [
+      {
+        "off": 0,
+        "name": "OPCode",
+        "type": "u8",
+        "note": "top-level command 0xF1..0xFB"
+      },
+      {
+        "off": 1,
+        "name": "Type",
+        "type": "u8",
+        "note": "sub-command / flags (e.g. 0x06 = DDR enable, 0x01 = write chunk)"
+      },
+      {
+        "off": 2,
+        "name": "LogicalBlockAddress",
+        "type": "u32",
+        "note": "flash byte address for writes (0x1500000 for hwsetting), page/block index for erase"
+      },
+      {
+        "off": 6,
+        "name": "NandEccBit",
+        "type": "u8"
+      },
+      {
+        "off": 7,
+        "name": "flashType",
+        "type": "u8",
+        "note": "0=NAND, 1=NOR, 2=EMMC"
+      },
+      {
+        "off": 8,
+        "name": "PageSize",
+        "type": "u16"
+      },
+      {
+        "off": 10,
+        "name": "blockSize",
+        "type": "u32"
+      },
+      {
+        "off": 14,
+        "name": "nandSize",
+        "type": "u32"
+      },
+      {
+        "off": 18,
+        "name": "Spare",
+        "type": "u16",
+        "note": "spare/OOB value; when == 0x79 and remap active, high byte carries remap index"
+      },
+      {
+        "off": 20,
+        "name": "WriteSpecialSize",
+        "type": "u32"
+      },
+      {
+        "off": 24,
+        "name": "CRC32",
+        "type": "u32",
+        "note": "CRC32 of the payload for this chunk"
+      }
+    ]
+  },
+  "commands": {
+    "0xF1": {
+      "name": "SE_STORAGE",
+      "handler": "se_storage_burner@key_write.cpp:89",
+      "note": "secure-storage key burn"
+    },
+    "0xF2": {
+      "name": "SINGLE_WRITE_STATUS",
+      "handler": "single_burner@single_write.cpp:32"
+    },
+    "0xF3": {
+      "name": "NAND_WRITE",
+      "handler": "nand_burner@nand_write.cpp:32",
+      "note": "NAND page program with BBT remap"
+    },
+    "0xF4": {
+      "name": "EMMC_WRITE",
+      "handler": "WriteDevice@dev_api.cpp:104 (66 call sites)",
+      "note": "primary bulk write opcode used everywhere"
+    },
+    "0xF5": {
+      "name": "USB_HWSETTING / DRAM_INIT",
+      "handler": "usb_hw_setting_burner@rtumdfsampledlg.cpp:4643"
+    },
+    "0xF9": {
+      "name": "EFUSE_BURN",
+      "handler": "efuse_burner@key_write.cpp:686"
+    },
+    "0xFA": {
+      "name": "DDR_ENABLE",
+      "typeByte": "0x06",
+      "handler": "usb_hw_setting_burner",
+      "note": "second-stage DDR enable after hwsetting"
+    },
+    "0xFB": {
+      "name": "SINGLE_WRITE_DATA",
+      "handler": "single_burner@single_write.cpp:32"
+    },
+    "0xF6": {
+      "name": "WRITE_VERIFY_TEST",
+      "handler": "TestWriteDevice@dev_api.cpp:828",
+      "flags": "0x80",
+      "evidence": "word store 0xF61C at 0x4049ef"
+    },
+    "0xFC": {
+      "name": "READ_VERIFY_TEST",
+      "handler": "TestWriteDevice/TestReadDevice",
+      "flags": "0x80",
+      "evidence": "word store 0xFC1C at 0x404fb9"
+    },
+    "0x1C": {
+      "name": "SENSE_REQUEST",
+      "handler": "TestReadDevice@dev_api.cpp:1079 + WriteDevice CSW poll",
+      "note": "frame reads 0x32 (50) bytes back: 43-byte CBW + 5-byte channel frame at 0x405f31"
+    }
+  },
+  "flash_info_struct": {
+    "name": "_FlashInfo (size 64, align 8)",
+    "fields": [
+      {
+        "off": 0,
+        "name": "flashType",
+        "type": "u8"
+      },
+      {
+        "off": 4,
+        "name": "nandSize",
+        "type": "u32"
+      },
+      {
+        "off": 8,
+        "name": "blockSize",
+        "type": "u32"
+      },
+      {
+        "off": 12,
+        "name": "pageSize",
+        "type": "u32"
+      },
+      {
+        "off": 16,
+        "name": "eccBit",
+        "type": "u8"
+      },
+      {
+        "off": 20,
+        "name": "start_addr",
+        "type": "u32"
+      },
+      {
+        "off": 24,
+        "name": "trans_size",
+        "type": "i64"
+      },
+      {
+        "off": 28,
+        "name": "write_special_count",
+        "type": "u32"
+      },
+      {
+        "off": 32,
+        "name": "cover_value",
+        "type": "i64"
+      },
+      {
+        "off": 40,
+        "name": "spare_value",
+        "type": "u16"
+      },
+      {
+        "off": 44,
+        "name": "once_trans_max_size",
+        "type": "u32"
+      },
+      {
+        "off": 48,
+        "name": "secure_option",
+        "type": "i32"
+      },
+      {
+        "off": 52,
+        "name": "go_or_jump_opetion",
+        "type": "i32"
+      },
+      {
+        "off": 56,
+        "name": "read_data_range",
+        "type": "u32"
+      },
+      {
+        "off": 60,
+        "name": "read_spare_count",
+        "type": "u32"
+      }
+    ]
+  },
+  "boot_sequence": {
+    "enumerated_in": "ThreadProgramDevice@rtumdfsampledlg.cpp:1541",
+    "steps": [
+      "Open device (CreateFile on the interface path)",
+      "ReadFlashInfo: read all _FlashInfo fields from GUI controls (flash type/ddr/nand size/block/page/ecc/start addr/trans range/spare/secure/go-jump)",
+      "prepareUsbHWBuf + usb_hw_setting_burner: WRITE 0xF5 to LBA 0x1500000 (DRAM init / hwsetting blob, AES-encrypted)",
+      "WRITE 0xFA type=0x06 -> DDR enable, then Sleep(1500 ms)",
+      "check_burn_options: dispatch on feature flags",
+      "bootloader.tar members written via 0xF4 at computed block addresses (u-boot / LK / FSBL / TEE / BL31 / hw_setting)",
+      "emmc_burner / nand_burner / single_burner: write install.img sections per layout.txt",
+      "key_burner: secure key bag / SN / MAC handling",
+      "factory_burner: factory.tar (layout.txt + env.txt + sn.txt + bootparam.h + enckey.bin) at factory block address",
+      "efuse_burner: 0xF9 efuse programmer (efuse_programmer.complete.enc)",
+      "Optional compare pass, then close device"
+    ]
+  },
+  "image_layout": {
+    "container": "install.img (tar-like Realtek image with W_FW_* / FW_* named members)",
+    "member_names_seen": [
+      "FW_FWTBL",
+      "W_FW_GOLD_TABLE",
+      "FW_KERNEL",
+      "FW_KERNEL_DT",
+      "FW_KERNEL_ROOTFS",
+      "FW_RESCUE_DT",
+      "FW_RESCUE_ROOTFS",
+      "FW_NAS_RESCUE_KERNEL",
+      "FW_NAS_RESCUE_DT",
+      "FW_NAS_RESCUE_ROOTFS",
+      "FW_AKERNEL",
+      "FW_TEEKERNEL",
+      "FW_BL31",
+      "FW_PUBOOT",
+      "FW_DALOGO",
+      "FW_DILOGO",
+      "FW_CILOGO1",
+      "FW_TABLE",
+      "FW_CONFIG",
+      "FW_PROFILE",
+      "FW_EFUSE_VERIFY",
+      "FW_EFUSE_PROGRAMMER",
+      "FW_GOLD_KERNEL",
+      "FW_GOLD_RESCUE_DT",
+      "FW_GOLD_ROOTFS",
+      "FW_GOLD_AKERNEL",
+      "FW_PART",
+      "FW_MBR",
+      "MBR0"
+    ],
+    "layout_txt_format": "one line per partition: target=<NAME> offset=<hex> size=<hex> [ name=<label> ]",
+    "layout_txt_parser": "LoadFlashLayout@rtumdfsampledlg.cpp:2748 (uses substrings 'target=', 'offset=', 'size=', ' name=')",
+    "unpack_dir": "UnTarTmp (tar xvf of the image; per-project Tempfile used as staging)"
+  },
+  "encryption": {
+    "algorithm": "AES-128",
+    "modes_used": [
+      "ECB (single block, decrypt)",
+      "CBC (stream, encrypt+decrypt)"
+    ],
+    "key_address": "g_AES_USB_key @ 0x5F7000 + 0x6AC8 (file offset 0x1F4C00 + 27336)",
+    "key_bytes_hex": "abcdef1213572468a1b2c3d49090babe",
+    "iv_address": "iv @ 0x5F7000 + 69552 region",
+    "iv_sample_hex": "4bd2a452c69d4ec0974dba9149b48b47",
+    "encrypted_artifacts": [
+      "Tempfile/usb_hwsetting.bin (1184 B)",
+      "Tempfile/kylin_usb_hwsetting_2DDR3_4Gb_1600_B.bin (1632 B)",
+      "Tempfile/kylin_usb_hwsetting_2DDR4_4Gb_1600_B.bin (1888 B)"
+    ],
+    "notes": "Each blob is an AES-CBC ciphertext from byte 0 (there is no plaintext header); decrypt with a zero IV to recover the DDR register program. The 16-byte \"common prefix\" seen earlier is just the first ciphertext block.",
+    "mode_confirmed": "CBC with a 16-byte ALL-ZERO IV",
+    "verified_decryption": {
+      "method": "AES-128-ECB, key=abcdef1213572468a1b2c3d49090babe, applied to the WHOLE file (no header skip)",
+      "note": "the earlier 'common 16-byte prefix' observation is actually a common 80-byte (5 AES block) prefix"
+    },
+    "iv_bytes_hex": null,
+    "CORRECTION": "Earlier revisions of this spec claimed 'AES-128-CBC with a zero IV' for the hwsetting blobs. That was WRONG. The correct mode is AES-128-ECB. Under CBC with IV=0 the first plaintext block equals the ECB result, so the first register pair looked valid and the rest was dismissed as noise.",
+    "modes_by_use": {
+      "hwsetting_dram_init_table": {
+        "mode": "ECB",
+        "key": "hardcoded RTK_AES_KEY_USB",
+        "files": [
+          "Tempfile/usb_hwsetting.bin",
+          "Tempfile/kylin_usb_hwsetting_2DDR3_4Gb_1600_B.bin",
+          "Tempfile/kylin_usb_hwsetting_2DDR4_4Gb_1600_B.bin"
+        ]
+      },
+      "enckey_bin_secure_key": {
+        "mode": "CBC",
+        "iv": "16 zero bytes",
+        "key": "caller-supplied, produced by GenKeyBag.exe"
+      }
+    },
+    "mode_proof": {
+      "method": "count 32-bit words landing in known register windows (0x1800xxxx / 0x9800xxxx); random gives ~0%",
+      "results": [
+        {
+          "file": "usb_hwsetting.bin",
+          "ECB": "128/296",
+          "CBC_zero_iv": "2/296"
+        },
+        {
+          "file": "kylin_usb_hwsetting_2DDR3_4Gb_1600_B.bin",
+          "ECB": "156/408",
+          "CBC_zero_iv": "1/408"
+        },
+        {
+          "file": "kylin_usb_hwsetting_2DDR4_4Gb_1600_B.bin",
+          "ECB": "179/472",
+          "CBC_zero_iv": "1/472"
+        }
+      ],
+      "conclusion": "ECB is correct by two orders of magnitude"
+    },
+    "usb_hwsetting_decrypted": {
+      "size": 1184,
+      "layout": "148 consecutive little-endian (u32 addr, u32 value) pairs",
+      "register_range": "0x18000000 - 0x1801A938 (RTD129x DDR controller)",
+      "first_pairs": [
+        [
+          "0x1801A010",
+          "0x0000001F"
+        ],
+        [
+          "0x1801A004",
+          "0x00000031"
+        ],
+        [
+          "0x18000018",
+          "0x00000005"
+        ],
+        [
+          "0x18000100",
+          "0x4D200043"
+        ],
+        [
+          "0x18000104",
+          "0x03942801"
+        ],
+        [
+          "0x18000158",
+          "0x0F7FF001"
+        ],
+        [
+          "0x18008004",
+          "0x094B0020"
+        ],
+        [
+          "0x18008800",
+          "0x00179713"
+        ]
+      ],
+      "tail": "after offset 0x460 the address field stops being a register (checksum/signature trailer)"
+    },
+    "kylin_blobs_target_other_soc": {
+      "note": "the kylin_* blobs decrypt with the same key but address a 0x98xxxxxx register space, not RTD1295's 0x18xxxxxx",
+      "ddr4_high_byte_histogram": {
+        "0x98": 188,
+        "0x00": 162,
+        "0xff": 39,
+        "0x13": 14,
+        "0x80": 12
+      },
+      "conclusion": "irrelevant to this board; ignore them"
+    }
+  },
+  "firmware_blobs": [
+    {
+      "file": "goddr/DeviceToEmmc.bin",
+      "arch": "ARM (AArch32)",
+      "size": 2552,
+      "role": "device-mode bootstrap helper: mov sl,lr; r0=0x1500000; memcpy loop; bx to loaded code"
+    },
+    {
+      "file": "goddr/DeviceToNand.bin",
+      "arch": "ARM (AArch32)",
+      "size": 2552,
+      "role": "NAND bootstrap helper"
+    },
+    {
+      "file": "goddr/DeviceToNor.bin",
+      "arch": "ARM (AArch32)",
+      "size": 264,
+      "role": "NOR bootstrap helper"
+    },
+    {
+      "file": "goddr/DeviceToEmmcAdjSpeed.bin",
+      "arch": "ARM (AArch32)",
+      "size": 244,
+      "role": "eMMC clock/speed adjust helper"
+    },
+    {
+      "file": "goddr/DummyEmmcBlk.bin",
+      "size": 512,
+      "role": "dummy eMMC block (all zero)"
+    },
+    {
+      "file": "Tempfile/nand_erase_dvrboot.exe.bin",
+      "arch": "ARM64 (AArch64)",
+      "size": 686328,
+      "role": "NAND erase / driver boot payload"
+    },
+    {
+      "file": "Tempfile/bootloader.tar",
+      "role": "bootloader bundle: bl31.bin(25248) fsbl.bin(72544) hw_setting.bin(3200) tee.bin(507616) uboot.bin(604128)"
+    },
+    {
+      "file": "Tempfile/factory.tar",
+      "size": 10240,
+      "role": "factory area container (layout.txt, env.txt, sn.txt, bootparam.h, enckey.bin)"
+    },
+    {
+      "file": "Tempfile/1295_default_env.txt",
+      "role": "default u-boot environment (audio_loadaddr, baudrate, bootcmd=bootr, gateways, mtdparts, ...)"
+    }
+  ],
+  "config_files": {
+    "SYSTEM.ini": {
+      "sections": [
+        "NAND FLASH TYPE",
+        "MULTI FLASH TYPE",
+        "INFORMATION",
+        "SYSTEM",
+        "1195_SYSTEM"
+      ],
+      "keys": [
+        "FLASH TYPE",
+        "FLASH COMBO TYPE",
+        "DDR TYPE",
+        "ONE WRITE SIZE",
+        "WRITE RANGE",
+        "IMAGE PATH",
+        "SINGLE MODE",
+        "BURN FACTORY",
+        "BURN SE STORAGE",
+        "ENCRYPTION KEY",
+        "ONLY UPGRADE LAYOUT FIRMWARE",
+        "ONLY UPGRADE SECURE FIRMWARE",
+        "ONLY BURN EFUSE",
+        "AUTO BURN",
+        "NF WRITER SKIP",
+        "COMPARE DATA",
+        "NAS ENABLE",
+        "LK ENABLE",
+        "MAX USB CONNECTION",
+        "SAVE LOG",
+        "GO DDR"
+      ],
+      "current_values": {
+        "FLASH TYPE": 2,
+        "FLASH COMBO TYPE": "EMMC",
+        "DDR TYPE": "4DDR4_2GB",
+        "ONE WRITE SIZE": 2,
+        "WRITE RANGE": 256,
+        "LK ENABLE": 1,
+        "MAX USB CONNECTION": 8,
+        "SAVE LOG": 1
+      }
+    },
+    "image/img.ini": "IMAGE NAME= ; DISPLAY OPEN IMG BUTTON=1",
+    "log/debug_log": "per-run debug log, format 'YYYYY-MMMDD...-icon-<n>.txt' from log_print.cpp"
+  },
+  "error_codes": {
+    "0x52450000": "ROR_READ_UNTAR_TEMP_FAIL",
+    "0x52450001": "ROR_OP_CODE_FAIL",
+    "0x52450002": "ROR_OPEN_FILE_FAIL",
+    "0x52450003": "ROR_FILE_SIZE_FAIL",
+    "0x52450004": "ROR_READ_FILE_FAIL",
+    "0x52450005": "ROR_CSW_READ_FAIL",
+    "0x52450006": "ROR_CSW_READ_THIRTY",
+    "0x52450007": "ROR_CSW_STAT_FAIL",
+    "0x52450008": "ROR_CSW_WRITER_FAIL",
+    "0x52450009": "ROR_READ_DEVICE_FAIL",
+    "0x5245000A": "ROR_CBW_WRITER_FAIL",
+    "0x5245000B": "ROR_TRANSMISSION_R_W_DATA_FAIL",
+    "0x5245000C": "ROR_REMAPPING_FAIL",
+    "0x5245000D": "ROR_REMAPPING_SIZE_FAIL",
+    "0x5245000E": "ROR_REMAPPING_MAX_SIZE_FAIL",
+    "0x5245000F": "ROR_REMAPPING_OUT_OF_RANGE",
+    "0x52450010": "ROR_REMAPPING_FLASHTYPE_FAIL",
+    "0x52450011": "ROR_FACTORY_FAIL",
+    "0x52450012": "ROR_FACTORY_READ_FAIL",
+    "0x52450013": "ROR_EMMC_WRITE_FAIL",
+    "0x52450014": "ROR_KEY_BAG_NOT_FOUND",
+    "0x52450015": "ROR_COMPARE_DATA_FAIL",
+    "0x52450016": "ROR_CREATE_BB_TABLE_FAIL",
+    "0x52450017": "ROR_NUMBER_OF_KEY_NOT_ENOUGH",
+    "0x52450018": "ROR_CUSTOMIZED_FAIL",
+    "0x52450064": "ROR_PASS"
+  },
+  "structures": {
+    "type_deviceInfo": {
+      "size": 848,
+      "fields": {
+        "hDevice": "void* +0",
+        "nor_flash_binary_len": "i64 +8",
+        "hwsettingRemainLen": "i64 +16",
+        "UserDataRemainLen": "i64 +24",
+        "SpecialRemainLen": "i64 +32",
+        "GoaddrRemainLen": "i64 +40",
+        "GoaddrPtLen[3]": "i64 +48",
+        "usb_hwLen": "i64 +72",
+        "hwLen": "i64 +80",
+        "LK_Len": "i64 +88",
+        "fsbLen": "i64 +96",
+        "tee_enc_Len": "i64 +104",
+        "bl31_enc_Len": "i64 +112",
+        "rsa_bin_fw_Len": "i64 +120",
+        "rsa_bin_tee_Len": "i64 +128",
+        "FW_Kernel_Len": "i64 +136",
+        "FW_Kernel_DT_Len": "i64 +144",
+        "FW_Kernel_RootFS_Len": "i64 +152",
+        "FW_Rescue_DT_Len": "i64 +160",
+        "FW_Rescue_RootFS_Len": "i64 +168",
+        "FW_Nas_Rescue_Kernel_Len": "i64 +176",
+        "FW_Nas_Rescue_DT_Len": "i64 +184",
+        "FW_Nas_Rescue_RootFS_Len": "i64 +192",
+        "FW_Akernel_Len": "i64 +200",
+        "FW_Teekernel_Len": "i64 +208",
+        "FW_Bl31_Len": "i64 +216",
+        "FW_Puboot_Len": "i64 +224",
+        "FW_Dalogo_Len": "i64 +232",
+        "FW_Dilogo_Len": "i64 +240",
+        "FW_Cilogo1_Len": "i64 +248",
+        "FW_Table_Len": "i64 +256",
+        "FW_Config_Len": "i64 +264",
+        "FW_Profile_Len": "i64 +272",
+        "FW_Efuse_Verify_Len": "i64 +280",
+        "FW_Efuse_Programmer_Len": "i64 +288",
+        "FW_Gold_Kernel_Len": "i64 +296",
+        "FW_Gold_Rescue_DT_Len": "i64 +304",
+        "FW_Gold_RootFS_Len": "i64 +312",
+        "FW_Gold_Akernel_Len": "i64 +320",
+        "FW_Part_Len": "i64* +328",
+        "FW_MBR_Len[30]": "i64 +336",
+        "Start": "i32 +576",
+        "bResult": "i32 +580",
+        "strDevPath": "char[260] +584"
+      }
+    },
+    "type_function_case": "{ bReadmode, bOnly_upgrade_uboot, bReadSparemode, bSingle, bCompare, bSeStorage, bEmmc_go_ddr_switch, bOnly_upgrade_firmware, bOnly_burn_efuse, bOnly_upgrade_secure_firmware, bBurn_factory_area, bNAS, bNandErase } (14 bytes copied as 14 dwords in decompiled code)",
+    "st_LoadLayoutData": "{ CString target (+0), i64 length (+8), u8* buffer (+16), i64 addrOffset (+24), u32 memAddress (+32) } size 40",
+    "st_LoadLayoutDataMbr": "{ CString target, i64 length, u8* buffer, i64 addrOffset, i64 partitionSize } size 40",
+    "st_LoadLayoutDataPart": "same as Mbr",
+    "_BB_t": "{ u16 BB_die, u16 bad_block, u16 RB_die, u16 remap_block } size 8",
+    "_BBT_List": "{ _BB_t* BBT, long rmp_blk_used_count, long rmp_blk_max_count } size 12",
+    "sysparam": "{ list_node node, u32 flags, char* name, u32 datalen, void* data, u32 memlen } size 28",
+    "sysparam_phys": "{ u32 magic(0x53595350 'PSYS'), u32 crc32, u32 flags, u16 namelen, u16 datalen, u8 namedata[] }",
+    "st_goddr_info": "{ CString filename, long dataLen, u8* detaBuf } size 12",
+    "UsbDeviicePathTableStuct": "{ CString UsbPortPidVid } size 4"
+  },
+  "key_files": {
+    "for_usb_mp_tool/keytemp/": "secure-key bag generation inputs: KRSAKeySet*.pem (public), key_set_final_enc.bin, envgroup.txt, bundled openssl_win7 for key ops",
+    "for_usb_mp_tool/Includes/Jedi*.inc": "Inno Setup include scripts (packaging)"
+  },
+  "reimplementation_notes": [
+    "The device is a plain WinUSB/UMDF vendor interface; any OS can talk to it via libusb bulk transfers once driver binding is replaced.",
+    "All framing is in userspace: 31-byte CBW -> optional payload -> 50-byte CSW. Do not implement real SCSI.",
+    "The `0x2B` first request is a status/sense poll, not a real SCSI READ.",
+    "iIndicator must be 1 / 0 / 3 for first / middle / last chunk; 2 is reported back by the device as BUSY.",
+    "CRC32 in CBWCB[24..27] covers the chunk payload; device verifies it.",
+    "Retry policy: 200 attempts, 200 ms sleep, 20 s overall timeout per CSW.",
+    "The AES key is a fixed constant; new firmware encryptions must use the same key or the device rejects them."
+  ],
+  "sector_unit": {
+    "note": "CBWCB.LogicalBlockAddress is a 512-byte sector index for bootloader members; usb_hwsetting uses raw byte address 0x1500000",
+    "verified_mapping": [
+      {
+        "member": "hw_setting.bin",
+        "bytes": 3200,
+        "lba": 256
+      },
+      {
+        "member": "uboot.bin",
+        "bytes": 604128,
+        "lba": 263
+      },
+      {
+        "member": "fsbl.bin",
+        "bytes": 72544,
+        "lba": 1443
+      },
+      {
+        "member": "tee.bin",
+        "bytes": 507616,
+        "lba": 1585
+      },
+      {
+        "member": "hw_setting.bin (addr 0x100 path)",
+        "bytes": 3200,
+        "lba": 256
+      }
+    ],
+    "formula": "next_lba = lba + ceil(size/512)",
+    "factory_start_pages": [
+      4352,
+      8448
+    ],
+    "factory_byte_offsets": [
+      "0x220000",
+      "0x420000"
+    ],
+    "factory_max_size": "0x200000"
+  },
+  "layout_type_members": {
+    "description": "Layout_Type is a 24-entry x 0x28-byte global array of st_LoadLayoutData in .data, built by the dynamic initializer ??__ELayout_Type@@YAXXZ. set_device_info_value @0x426BD0 copies Layout_Type[n].length into the matching type_deviceInfo.FW_*_Len field.",
+    "stride": "0x28",
+    "count": 24,
+    "note": "Member names end with a trailing space; layout.txt parsing matches the full string including that space. FW_PROFILE is skipped when partition count >= 2.",
+    "entries": [
+      {
+        "index": 0,
+        "offset": "0x000",
+        "target": "FW_KERNEL ",
+        "field": "FW_Kernel_Len",
+        "field_offset": null
+      },
+      {
+        "index": 1,
+        "offset": "0x028",
+        "target": "FW_RESCUE_DT ",
+        "field": "FW_Rescue_DT_Len",
+        "field_offset": null
+      },
+      {
+        "index": 2,
+        "offset": "0x050",
+        "target": "FW_KERNEL_DT ",
+        "field": "FW_Kernel_DT_Len",
+        "field_offset": null
+      },
+      {
+        "index": 3,
+        "offset": "0x078",
+        "target": "FW_RESCUE_ROOTFS ",
+        "field": "FW_Rescue_RootFS_Len",
+        "field_offset": null
+      },
+      {
+        "index": 4,
+        "offset": "0x0A0",
+        "target": "FW_KERNEL_ROOTFS ",
+        "field": "FW_Kernel_RootFS_Len",
+        "field_offset": null
+      },
+      {
+        "index": 5,
+        "offset": "0x0C8",
+        "target": "FW_NAS_RESCUE_KERNEL ",
+        "field": "FW_Nas_Rescue_Kernel_Len",
+        "field_offset": null
+      },
+      {
+        "index": 6,
+        "offset": "0x0F0",
+        "target": "FW_NAS_RESCUE_DT ",
+        "field": "FW_Nas_Rescue_DT_Len",
+        "field_offset": null
+      },
+      {
+        "index": 7,
+        "offset": "0x118",
+        "target": "FW_NAS_RESCUE_ROOTFS ",
+        "field": "FW_Nas_Rescue_RootFS_Len",
+        "field_offset": null
+      },
+      {
+        "index": 8,
+        "offset": "0x140",
+        "target": "FW_AKERNEL ",
+        "field": "FW_Akernel_Len",
+        "field_offset": null
+      },
+      {
+        "index": 9,
+        "offset": "0x168",
+        "target": "FW_TEEKERNEL ",
+        "field": "FW_Teekernel_Len",
+        "field_offset": null
+      },
+      {
+        "index": 10,
+        "offset": "0x190",
+        "target": "FW_BL31 ",
+        "field": "FW_Bl31_Len",
+        "field_offset": null
+      },
+      {
+        "index": 11,
+        "offset": "0x1B8",
+        "target": "FW_P_UBOOT ",
+        "field": "FW_Puboot_Len",
+        "field_offset": null
+      },
+      {
+        "index": 12,
+        "offset": "0x1E0",
+        "target": "FW_DALOGO ",
+        "field": "FW_Dalogo_Len",
+        "field_offset": null
+      },
+      {
+        "index": 13,
+        "offset": "0x208",
+        "target": "FW_DILOGO ",
+        "field": "FW_Dilogo_Len",
+        "field_offset": null
+      },
+      {
+        "index": 14,
+        "offset": "0x230",
+        "target": "FW_CILOGO1 ",
+        "field": "FW_Cilogo1_Len",
+        "field_offset": null
+      },
+      {
+        "index": 15,
+        "offset": "0x258",
+        "target": "FW_FWTBL ",
+        "field": "FW_Table_Len",
+        "field_offset": null
+      },
+      {
+        "index": 16,
+        "offset": "0x280",
+        "target": "FW_CONFIG ",
+        "field": "FW_Config_Len",
+        "field_offset": null
+      },
+      {
+        "index": 17,
+        "offset": "0x2A8",
+        "target": "FW_PROFILE ",
+        "field": "FW_Profile_Len",
+        "field_offset": null
+      },
+      {
+        "index": 18,
+        "offset": "0x2D0",
+        "target": "FW_GOLD_KERNEL ",
+        "field": "FW_Gold_Kernel_Len",
+        "field_offset": null
+      },
+      {
+        "index": 19,
+        "offset": "0x2F8",
+        "target": "FW_GOLD_RESCUE_DT ",
+        "field": "FW_Gold_Rescue_DT_Len",
+        "field_offset": null
+      },
+      {
+        "index": 20,
+        "offset": "0x320",
+        "target": "FW_GOLD_ROOTFS ",
+        "field": "FW_Gold_RootFS_Len",
+        "field_offset": null
+      },
+      {
+        "index": 21,
+        "offset": "0x348",
+        "target": "FW_GOLD_AKERNEL ",
+        "field": "FW_Gold_Akernel_Len",
+        "field_offset": null
+      },
+      {
+        "index": 22,
+        "offset": "0x370",
+        "target": "FW_EFUSE_VERIFY ",
+        "field": "FW_Efuse_Verify_Len",
+        "field_offset": null
+      },
+      {
+        "index": 23,
+        "offset": "0x398",
+        "target": "FW_EFUSE_PROGRAMMER ",
+        "field": "FW_Efuse_Programmer_Len",
+        "field_offset": null
+      }
+    ],
+    "evidence": [
+      "set_device_info_value @0x426BD0 writes Layout_Type[0].length -> FW_Kernel_Len .. Layout_Type[0x17].length -> FW_Efuse_Programmer_Len",
+      "efuse_burner @0x410510 compares param_3[0x17].target == 'FW_EFUSE_PROGRAMMER ' and param_3[0x16].target == 'FW_EFUSE_VERIFY '",
+      "emmc_burner @0x407050 passes Layout_Type[0].buffer with &param_2->FW_Kernel_Len into WriteDevice(0xF4)",
+      "ReadUnTarTempFile @0x41E910 loops psVar30 += 1 with uVar21 += 0x28 while uVar21 < 0x3C0 (24 entries)"
+    ]
+  },
+  "secure_key_pipeline": {
+    "summary": "The main tool contains NO RSA. It only has AES-128 (ECB+CBC), CRC32 and MD5. RSA lives in the external GenKeyBag.exe / ShowKeyBag.exe, which are NOT shipped inside this package and are not embedded in the PE resource section.",
+    "crypto_in_main_binary": [
+      {
+        "address": "0x00401780",
+        "name": "AES128_ECB_decrypt"
+      },
+      {
+        "address": "0x004017d0",
+        "name": "AES128_CBC_encrypt_buffer"
+      },
+      {
+        "address": "0x004018e0",
+        "name": "AES128_CBC_decrypt_buffer"
+      },
+      {
+        "address": "0x004019f0",
+        "name": "crc32"
+      },
+      {
+        "address": "0x00429160",
+        "name": "sysparam_crc32"
+      },
+      {
+        "address": "0x0042c4a0",
+        "name": "tarlib::tarEntry::makeMD5",
+        "note": "tar header checksum only, not security"
+      }
+    ],
+    "rsa_public_keys": [
+      {
+        "file": "KRSAKeySetPub.pem",
+        "modulus_prefix": "D10C231B2740A7E3",
+        "bits": 1024,
+        "purpose": "key set verify/unseal"
+      },
+      {
+        "file": "KRSAKeySetPub1.pem",
+        "modulus_prefix": "D10C231B2740A7E3",
+        "bits": 1024,
+        "purpose": "identical to KRSAKeySetPub.pem"
+      },
+      {
+        "file": "KRSAKeySetHeaderPub.pem",
+        "modulus_prefix": "D854FB1DE331F252",
+        "bits": 1024,
+        "purpose": "key set HEADER verify"
+      }
+    ],
+    "external_tools_missing_from_package": [
+      {
+        "name": "GenKeyBag.exe",
+        "referenced_at": "0x00431367 push './GenKeyBag.exe' then call 0x40D600 call_createProcess",
+        "role": "generates raw secure key material (plaintext)"
+      },
+      {
+        "name": "ShowKeyBag.exe",
+        "referenced_at": "0x005A1FD0 (string only)",
+        "role": "displays/decrypts an existing key bag"
+      }
+    ],
+    "iv_global": {
+      "symbol": "?iv@@3PAEA",
+      "address": "0x00607FB0",
+      "section": ".data (BSS part: VSize 0x12140 > RawSize 0x6C00, zero-filled at load)",
+      "conclusion": "the AES-CBC IV used for keybag encryption is 16 zero bytes, same convention as the hwsetting blobs",
+      "evidence": "CBC_encryption_secure_key @0x42DC70 passes &iv (literal 0x607FB0) into AES128_CBC_encrypt_buffer; PDB places ?iv@@3PAEA at .data offset 69552 => 0x5F7000+69552 = 0x607FB0"
+    },
+    "keybag_artifacts": [
+      "key_bag_final_sing_cbc_enc.bin",
+      "key_bag_final_sig_enc.bin",
+      "key_bag_final_sig_dec.bin",
+      "enckey.bin",
+      "idx.txt / nowidx.txt / sn.txt"
+    ],
+    "pipeline": [
+      "call GenKeyBag.exe  -> raw secure key (plaintext)",
+      "CBC_encryption_secure_key @0x42DC70 (AES-128-CBC, zero IV) -> key_bag_final_sing_cbc_enc.bin",
+      "sign/verify with KRSAKeySet*Pub.pem -> key_bag_final_sig_enc.bin / _dec.bin",
+      "move_all_secure_key_to_pc_rtk_tool_file @0x4335A0 -> enckey.bin into factory area"
+    ],
+    "bytes_on_the_wire": {
+      "note": "the main binary never references key_set_final_enc.bin, KRSAKeySet*.pem, 'openssl' or '.pem' at all (0 occurrences each). Those files are inputs to GenKeyBag.exe / ShowKeyBag.exe only.",
+      "main_binary_references": {
+        "GenKeyBag": 4,
+        "ShowKeyBag": 2,
+        "key_set_final_enc.bin": 0,
+        "KRSAKeySetPub": 0,
+        "KRSAKeySetHeaderPub": 0,
+        "openssl": 0,
+        ".pem": 0
+      },
+      "cbc_pipeline_strings": [
+        {
+          "address": "0x5A22DC",
+          "text": "icon[%d] : efuse - cbc encrypcion "
+        },
+        {
+          "address": "0x5A231C",
+          "text": "cbc enc - read source code - raw key (enckey.bin) failr"
+        },
+        {
+          "address": "0x5A2358",
+          "text": "cbc enc - move file failed , rename cbc_enckey.bin to enckey.bin"
+        },
+        {
+          "address": "0x5A23F0",
+          "text": "cbc enc - delete file pc temp tmp se_storage enckey.bin failed"
+        },
+        {
+          "address": "0x5A2448",
+          "text": "cbc enc - delete file pc temp tmp se_storage cbc_enckey.bin failed"
+        }
+      ],
+      "semantics": "CBC_encryption_secure_key reads enckey.bin (RAW key), encrypts it with AES-128-CBC/zero-IV using the key passed by the caller, writes cbc_enckey.bin, then verifies by decrypting and comparing before renaming to enckey.bin."
+    },
+    "iv_call_evidence": [
+      "0x42DD96 push 0x607FB0  -> 0x42DDA5 call AES128_CBC_encrypt_buffer",
+      "0x42DE6D push 0x607FB0  -> 0x42DE7C call AES128_CBC_decrypt_buffer"
+    ],
+    "unresolved": {
+      "artifact": "key_set_final_enc.bin",
+      "size": 1408,
+      "observations": [
+        "1408 = 11 x 128 (1024-bit RSA block size)",
+        "only 7-8 of 11 big-endian blocks are < n; little-endian similar => not plain whole-block RSA",
+        "block^65537 mod n with all three KRSA public keys yields neither 00 01 nor 00 02 PKCS#1 structure",
+        "private-key op with the only available key (openssl_win7/mykey.pem) yields high-entropy output",
+        "contains 14 identical 16-byte blocks at offsets 0x20,0x40,0x50,0x80,0xB0..0x140 (CBC/structural repetition, not E(0) of any known key)"
+      ],
+      "conclusion": "the outer key/layout of key_set_final_enc.bin is produced/consumed by the missing GenKeyBag.exe; closing this fully requires the original installer payload"
+    },
+    "efuse_burn": {
+      "opcode": "0xF9",
+      "type_byte": "0x05",
+      "passes": [
+        {
+          "order": 1,
+          "data": "FW_EFUSE_PROGRAMMER ",
+          "layout_index": "0x17",
+          "field": "FW_Efuse_Programmer_Len",
+          "target": "Layout_Type[0x17].memAddress"
+        },
+        {
+          "order": 2,
+          "data": "FW_EFUSE_VERIFY ",
+          "layout_index": "0x16",
+          "field": "FW_Efuse_Verify_Len",
+          "target": "Layout_Type[0x16].memAddress"
+        }
+      ],
+      "skip_condition": "FW_Efuse_Programmer_Len == 0 -> log 'efuse_programmer.complete.enc length=0,pass burn efuse.' and return",
+      "post_sleep_ms": 4000
+    },
+    "misc": {
+      "openssl_win7_decrypted_txt": "'i am louis' - leftover test file from Realtek/ODM",
+      "openssl_win7_mykey_pem": "sample private key, modulus E450819D... which matches none of the three KRSA public keys",
+      "packaged_factory_tar": "Tempfile/factory.tar is 10240 bytes of all zeros (placeholder)"
+    }
+  },
+  "why_it_works_without_genkeybag": {
+    "question": "Why does this package work even though GenKeyBag.exe is not included?",
+    "answer": "Because this configuration never takes the secure-key path. Three independent gates each route to a skip branch; the shipped SYSTEM.ini satisfies all three. The secure-key, factory and efuse stages are simply never entered.",
+    "gates": [
+      {
+        "id": "burn_options",
+        "site": "check_burn_options @0x0040D920 (functioncode.cpp)",
+        "switch_on": "param_2",
+        "branches": {
+          "0": "bOnly_burn_efuse | bReadSparemode | bReadmode | bOnly_upgrade_uboot | bSingle",
+          "1": "(bOnly_burn_efuse | bReadSparemode | bReadmode | bSingle) & (bBurn_factory_area == 0)",
+          "2": "bBurn_factory_area",
+          "3": "bOnly_upgrade_secure_firmware | bOnly_upgrade_firmware"
+        },
+        "ship_config": {
+          "BURN_FACTORY": 0,
+          "BURN_SE_STORAGE": 0,
+          "ONLY_BURN_EFUSE": 0,
+          "ONLY_UPGRADE_SECURE_FIRMWARE": 0
+        },
+        "effect": "bBurn_factory_area == 0 makes case 1 unconditionally true; the key/factory stage is skipped"
+      },
+      {
+        "id": "efuse_length_zero",
+        "site": "efuse_burner @0x00410510 (key_write.cpp:686)",
+        "code": "if (FW_Efuse_Programmer_Len == 0 && hi32(FW_Efuse_Programmer_Len) == 0) { log 'efuse_programmer.complete.enc length=0,pass burn efuse.'; return 100; }",
+        "observed": "log line appears 24 times (once per burn run)",
+        "effect": "install.img contains no FW_EFUSE_PROGRAMMER member, so Layout_Type[0x17].length stays 0 and opcode 0xF9 is never sent"
+      },
+      {
+        "id": "factory_writefactory_not_y",
+        "site": "check_factory @0x00432240 (writefactory.cpp:1454)",
+        "disasm": [
+          "0x43263C  cmp dword ptr [ebp + 0x14], 0   ; writefactory flag",
+          "0x432640  je  0x43268A                    ; == 0 -> skip branch",
+          "0x43268A  push 0x5A2D3C   ; 'check : writefactory != y\\r\\ndo not check secure key\\r\\n'"
+        ],
+        "observed": "log lines 'check : writefactory != y' / 'do not check secure key' appear 24 times",
+        "effect": "factory.tar with writefactory != y is not key-checked"
+      }
+    ],
+    "log_evidence_counts": {
+      "secure : 0": 73,
+      "efuse_programmer.complete.enc length=0,pass burn efuse.": 24,
+      "do not check secure key": 24,
+      "full install - write blank factory.tar not include secure key- icon[0]": 24
+    },
+    "effective_path": {
+      "hwsetting_ddr": "runs (0xF5 + 0xFA) - no key needed",
+      "bootloader": "runs (0xF4 per member)",
+      "system_image": "runs (per layout.txt)",
+      "key_burner": "SKIPPED",
+      "factory_area": "SKIPPED (writes blank factory.tar instead)",
+      "efuse": "SKIPPED (0xF9 never sent)"
+    },
+    "warning": "Setting BURN FACTORY=1, BURN SE STORAGE=1 or ONLY BURN EFUSE=1 will make the tool fail immediately because GenKeyBag.exe is absent (CALL_PROCESS_GEN_SINGLE_KEY_FAIL / GEN_SINGLE_KEY_FAIL).",
+    "corroboration": "This is a firmware-only trimmed distribution: config.txt is also missing (referenced as '\\config.txt') and envgroup.txt contains a single byte '1'."
+  },
+  "related_serial_tool": {
+    "path": "Desktop/key/boot_recovery.exe",
+    "identity": "RTD1295/RTD1296 UART boot recovery tool, MFC, built with VC6, dated 2017-02-14",
+    "crypto": "NONE - no AES/RSA/MD5/SHA symbols, no crypt32 import",
+    "imports": [
+      "ADVAPI32",
+      "COMCTL32",
+      "GDI32",
+      "KERNEL32",
+      "OLEAUT32",
+      "OLEPRO32",
+      "USER32",
+      "WINSPOOL",
+      "comdlg32",
+      "ole32",
+      "oledlg"
+    ],
+    "key_functions": [
+      "CBoot_recoveryDlg::hwconfig_to_Hwbinfile",
+      "CBoot_recoveryDlg::parse_line",
+      "CBoot_recoveryDlg::atoh",
+      "CBoot_recoveryDlg::swap",
+      "CBoot_recoveryDlg::MakeBlock0",
+      "CBoot_recoveryDlg::thread_write_hw_setting",
+      "CBoot_recoveryDlg::thread_ymodem_proc",
+      "CBoot_recoveryDlg::sendY",
+      "CBoot_recoveryDlg::CRC16",
+      "CBoot_recoveryDlg::Checksum",
+      "CBoot_recoveryDlg::EnableRS232",
+      "CBoot_recoveryDlg::ConsoleSnifferStart",
+      "CBoot_recoveryDlg::FindACKInRXBuf",
+      "CBoot_recoveryDlg::ProcessResponse"
+    ],
+    "pipeline": "text .config  ->  HwConfig.bin  ->  YMODEM over UART  ->  device",
+    "relation_to_usb_tool": "Same hardware, two independent paths: the USB tool sends an AES-ECB encrypted hwsetting blob over USB; this tool sends the plaintext HwConfig.bin over UART. Getting a .config sample would let us map plaintext -> ciphertext exactly.",
+    "companion_files": [
+      "boot_recovery.obj (149 syms, unstripped)",
+      "boot_recoveryDlg.obj (1174 syms, unstripped)",
+      "boot_recovery.pch",
+      "boot_recovery.res",
+      "vc60.idb",
+      "setting.ini"
+    ],
+    "debris": "StdAfx.obj is a stub with only a .drectve section (linker leftover)",
+    "setting_ini": {
+      "uart_port": "COM1",
+      "hwsetting": "C:\\Users\\MissHan\\Desktop\\RTD1296 4G\\U-Boot\\ABCTel_RTD1296_4DDR4_8Gb_s1866_emmc.config",
+      "bootcode": "C:\\Users\\MissHan\\Desktop\\RTD1296 4G\\U-Boot\\ABCTel_RTD1296_4DDR4_8Gb_s1866_emmc.bin"
+    }
+  },
+  "unrelated_rtd_customer_tool": {
+    "path": "Desktop/4f474-main/RTD",
+    "identity": "RTD-Customer-Tool v3.8 (2019-07-10) for RTD display scaler chips",
+    "soc_families": [
+      "RTD2172",
+      "RTD2186",
+      "RTD2525AR-CG",
+      "RTD2537T-CG",
+      "RTD2775TM-CG",
+      "RTD2776B-CG",
+      "RTD2785TM-CG",
+      "RTD2795T-CG",
+      "RTD2797PM-VDL-CG",
+      "RTD2797UPM-CG"
+    ],
+    "verdict": "NOT related to RTD1295/RTD1296. Zero occurrences of 1295/1296/1195 anywhere in the tree.",
+    "components": [
+      "RTDTool.exe",
+      "Comm_*.dll (FTDI/GFXI2C/Smbus/RealtekUSB/TypeC/UsbHub)",
+      "PlugIn_*.dll (Flash/ISP/I2C/GPIO/Gamma/DPCD/HDCP/EDID/...)",
+      "RTDCustomerTool_V3.8_20190710.rar (RAR5, 20 MB, same content)"
+    ]
+  },
+  "hwconfig_binary_format": {
+    "status": "FULLY RECOVERED from boot_recovery.exe",
+    "summary": "The plaintext format of usb_hwsetting.bin / HwConfig.bin is a flat stream of little-endian u32 instructions. No .config sample is needed to reproduce it.",
+    "recovered_from": {
+      "tool": "Desktop/key/boot_recovery.exe (RTD1295/RTD1296 UART recovery tool, MFC/VC6)",
+      "wrapper": {
+        "address": "0x00401C30",
+        "role": "hwconfig_to_Hwbinfile outer wrapper: paths, DeleteFileA, dialog access"
+      },
+      "converter": {
+        "address": "0x00404810",
+        "role": "the real per-line parser and binary writer"
+      },
+      "helpers": {
+        "0x00404DD0": "write u32 byte-by-byte from LSB to MSB (little-endian)",
+        "0x00404D60": "hex parser, accepts 0x prefix, upper or lower case",
+        "0x0040D214": "tokenizer",
+        "0x0040DBC8": "read one line into an 0x800 buffer",
+        "0x0040D6FF": "fopen; input mode 'rt' (DAT_00435B0C), output mode 'wb' (DAT_00435B08)"
+      },
+      "separators": "DAT_00435B10 == b' ,' (space and comma); code also skips \\0, \\t, \\n, '#' and '/'"
+    },
+    "instruction_grammar": {
+      "note": "every field is a little-endian u32; the low 2 bits of the first word select the op",
+      "ops": [
+        {
+          "mnemonic": "w",
+          "text": "w <addr> <value>",
+          "emit": [
+            "addr",
+            "value"
+          ],
+          "words": 2,
+          "meaning": "register write"
+        },
+        {
+          "mnemonic": "p",
+          "text": "p <addr> <a> <b>",
+          "emit": [
+            "addr|1",
+            "a",
+            "b"
+          ],
+          "words": 3,
+          "meaning": "poll until (read & a) == b"
+        },
+        {
+          "mnemonic": "n",
+          "text": "n <value>",
+          "emit": [
+            3,
+            "value"
+          ],
+          "words": 2,
+          "meaning": "nop / delay"
+        },
+        {
+          "mnemonic": "m",
+          "text": "m <addr> <a> <b> [<or>]",
+          "emit": [
+            "addr|2",
+            "a",
+            "b"
+          ],
+          "words": 3,
+          "meaning": "read-modify-write: (read & a) | or"
+        },
+        {
+          "mnemonic": "(eof)",
+          "text": "(end of file)",
+          "emit": [
+            "0xFFFFFFFF"
+          ],
+          "words": 1,
+          "meaning": "terminator"
+        }
+      ],
+      "decode_rule": "first == 0xFFFFFFFF -> end; first == 3 -> nop (2 words); first & 2 -> mask (3 words); first & 1 -> poll (3 words); else write (2 words)",
+      "special_case": "if a mask address is 0xB801A60C and it is the first mask, the next token is a repeat count"
+    },
+    "original_log_formats": [
+      "write: 0x%08x = 0x%08x",
+      "poll: 0x%08x & 0x%08x = 0x%08x",
+      "nop: 0x%x",
+      "mask: (0x%08x & 0x%08x) | 0x%08x, repeat=%d",
+      "stuff %d dummy zero(es)",
+      "skip unknown: %s"
+    ],
+    "blob_layout": {
+      "instructions": "flat u32 stream",
+      "terminator": "0xFFFFFFFF",
+      "trailer": {
+        "size_bytes": "60..120 depending on file",
+        "header_16": "efabcdaa 13572468 a1b2c3d4 9092baba (bytes[4:12] == AES key[4:12]; first 3 bytes look like a key-byte permutation)",
+        "middle": "small field, almost all zero; usb_hwsetting.bin has 80 00*9 23 a0 (trailing 0x23A0 LE, likely a length/checksum tag)",
+        "signature_32": "trailing 32-byte MAC over the preceding data",
+        "mac_algorithm": "NOT recovered; it is not MD5/SHA of any obvious range. Preserve the existing trailer verbatim when regenerating."
+      }
+    },
+    "verification": {
+      "decoded": [
+        {
+          "file": "usb_hwsetting.bin",
+          "words": 296,
+          "ops": 141,
+          "write": 128,
+          "nop": 12,
+          "mask": 0,
+          "poll": 0,
+          "end": 1,
+          "trailer_bytes": 60,
+          "roundtrip": "1184->1184 OK"
+        },
+        {
+          "file": "kylin_usb_hwsetting_2DDR3_4Gb_1600_B.bin",
+          "words": 408,
+          "ops": 184,
+          "write": 165,
+          "nop": 2,
+          "mask": 13,
+          "poll": 3,
+          "end": 1,
+          "trailer_bytes": 100,
+          "roundtrip": "1632->1632 OK"
+        },
+        {
+          "file": "kylin_usb_hwsetting_2DDR4_4Gb_1600_B.bin",
+          "words": 472,
+          "ops": 208,
+          "write": 177,
+          "nop": 3,
+          "mask": 21,
+          "poll": 6,
+          "end": 1,
+          "trailer_bytes": 120,
+          "roundtrip": "1888->1888 OK"
+        }
+      ],
+      "aes_bijection": "AES_ECB_encrypt(AES_ECB_decrypt(orig)) == orig for all three files -> ECB mode confirmed",
+      "grammar_cross_check": "all three files decode with the same grammar; the kylin blobs exercise all four op types (mask/poll/nop/write)"
+    },
+    "tool": {
+      "path": "spec/hwconfig_tool.py",
+      "commands": [
+        "decode <blob.bin>                       # decrypt + disassemble + trailer report",
+        "roundtrip <blob.bin>                    # decode -> text -> re-encode, verify lossless",
+        "encode <in.config> <out.bin> [--encrypt]",
+        "selftest                                # verify all three shipped blobs"
+      ]
+    },
+    "consequence": "You can generate your own hwsetting without GenKeyBag.exe and without a .config sample: write a .config, encode it, reuse the trailer, AES-128-ECB encrypt, then send it with opcode 0xF5 to address 0x1500000."
+  },
+  "config_text_parsing": {
+    "status": "recovered from the companion .obj files",
+    "caveat": "boot_recoveryDlg.obj (2016-12-08) and boot_recovery.exe (2017-02-14) are NOT the same link. swap() matches only its first 8 bytes in the exe, and parse_line's jump table / string references do not line up. Conclusions below are based on the obj's symbols and relocation table, cross-checked against the exe's strings and imports; the intended logic is consistent between the two.",
+    "parse_line": {
+      "signature": "int CBoot_recoveryDlg::parse_line(char *line, unsigned int *out1, unsigned int *out2)",
+      "calling_convention": "__thiscall, ret 0xc",
+      "obj_section": 109,
+      "size": "0x120",
+      "relocations": [
+        {
+          "offset": "0x02",
+          "type": "dir32",
+          "target": "??_C@_03IGFG@?5?0?7?$AA@",
+          "role": "separator literal"
+        },
+        {
+          "offset": "0x19",
+          "type": "rel32",
+          "target": "_strtok",
+          "role": "token 1"
+        },
+        {
+          "offset": "0x4e",
+          "type": "rel32",
+          "target": "_strtok",
+          "role": "token 2"
+        },
+        {
+          "offset": "0x73",
+          "type": "rel32",
+          "target": "_strtok",
+          "role": "token 3"
+        },
+        {
+          "offset": "0x9c",
+          "type": "rel32",
+          "target": "_strtok",
+          "role": "token 4"
+        },
+        {
+          "offset": "0x61",
+          "type": "rel32",
+          "target": "?atoh@CBoot_recoveryDlg@@QAEIPAD@Z",
+          "role": "hex 1"
+        },
+        {
+          "offset": "0x82",
+          "type": "rel32",
+          "target": "?atoh@CBoot_recoveryDlg@@QAEIPAD@Z",
+          "role": "hex 2"
+        },
+        {
+          "offset": "0xab",
+          "type": "rel32",
+          "target": "?atoh@CBoot_recoveryDlg@@QAEIPAD@Z",
+          "role": "hex 3"
+        },
+        {
+          "offset": "0xeb",
+          "type": "rel32",
+          "target": "_printf",
+          "role": "skip command: %s"
+        },
+        {
+          "offset": "0x3b",
+          "type": "dir32",
+          "target": "$L87430",
+          "role": "switch byte table"
+        },
+        {
+          "offset": "0x42",
+          "type": "dir32",
+          "target": "$L87431",
+          "role": "switch jump table"
+        }
+      ],
+      "separator_bytes": "20 2c 09 00",
+      "separator_text": "' ' ',' '\\t' '\\0'  (space, comma, TAB) -- NO equals sign",
+      "dispatch": {
+        "prologue": "movsx eax,[eax] ; add eax,-0x6d ; cmp eax,0xa ; ja fail ; mov dl,[eax] ; jmp [edx*4]",
+        "base_char": "'m' (0x6D)",
+        "candidate_range": "'m' .. 'w' (11 entries: m n o p q r s t u v w)",
+        "covers": [
+          "m (mask)",
+          "n (nop)",
+          "p (poll)",
+          "w (write)"
+        ]
+      },
+      "branches": [
+        {
+          "at": "0x046",
+          "behaviour": "strtok -> atoh -> *out1; strtok -> atoh -> *out2; return 0"
+        },
+        {
+          "at": "0x094",
+          "behaviour": "strtok -> atoh -> *out2; *out1 = 0; then apply the 0x10000000 rule below"
+        },
+        {
+          "at": "0x0E4",
+          "behaviour": "printf(\"skip command: %s\\n\"); return -1"
+        }
+      ],
+      "special_rule_at_0x094": {
+        "disasm": [
+          "mov eax, [out2]",
+          "cmp eax, 0x10000000",
+          "jae L_shift",
+          "mov dword ptr [out1], 1   ; out2 < 0x10000000 -> out1 = 1",
+          "xor eax, eax ; ret",
+          "L_shift:",
+          "shr eax, 0x1c             ; out1 = out2 >> 28",
+          "mov [out1], eax",
+          "xor eax, eax ; ret"
+        ],
+        "meaning": "encodes a 4-bit mode/flags field in the top nibble and a 28-bit value in the low bits; out1 receives either 1 or (out2 >> 28)"
+      }
+    },
+    "swap": {
+      "signature": "void CBoot_recoveryDlg::swap(char *dst, const char *src)",
+      "calling_convention": "__stdcall, ret 8",
+      "obj_section": 103,
+      "size": "0x18 (24 bytes), zero relocations so the obj listing is final",
+      "disassembly": [
+        "mov eax, [esp+4]   ; src",
+        "mov ecx, [esp+8]   ; dst",
+        "mov dl, [eax+3] ; mov [ecx+0], dl",
+        "mov dl, [eax+2] ; mov [ecx+1], dl",
+        "mov dl, [eax+1] ; mov [ecx+2], dl",
+        "mov al, [eax+0] ; mov [ecx+3], al",
+        "ret 8"
+      ],
+      "semantics": "dst = byteswap(src) -- pure 4-byte reversal",
+      "used_by": "the UART/YMODEM path (big-endian header/CRC fields), NOT by the .config converter"
+    },
+    "equals_sign": {
+      "handled": false,
+      "evidence": [
+        "parse_line has no relocation or symbol involving '='; separators are only space/comma/TAB",
+        "FUN_00404810 uses FUN_0040D214 with the literal b' ,' and additionally skips \\0 \\t \\n '#' '/'",
+        "a full .text scan of boot_recovery.exe finds 0 instances of `cmp <reg>, 0x3D`",
+        "all 21 '=' bytes in the image are instruction immediates (e.g. the 0x3D inside `cmp eax,0xC0000000`) or .rsrc icon pixels -- none is a separator string"
+      ],
+      "conclusion": ".config syntax is POSITIONAL, not key=value. 'w 0x1801a010 0x1f' is correct; 'addr=0x1801a010 val=0x1f' is treated as an unknown command. Realtek docs that show 'name = value' describe a different tool/format."
+    },
+    "two_tokenisers": {
+      "usb_config_converter": {
+        "function": "FUN_00404810 -> FUN_0040D214",
+        "separator": "b' ,' (literal at 0x00435B10)",
+        "also_skips": [
+          "\\0",
+          "\\t",
+          "\\n",
+          "#",
+          "/"
+        ]
+      },
+      "uart_parse_line": {
+        "function": "CBoot_recoveryDlg::parse_line",
+        "separator": "b' ,\\t' (bytes 20 2c 09 00)",
+        "parser": "strtok + atoh"
+      }
+    }
+  },
+  "atoh_behaviour": {
+    "status": "bit-exact, verified by Unicorn emulation of the real bytes",
+    "function": "CBoot_recoveryDlg::atoh",
+    "address": "0x00404D60",
+    "size_bytes": 98,
+    "provenance": "the exe's bytes are byte-identical to boot_recoveryDlg.obj section 107, so the emulated code is exactly the shipped parser",
+    "disassembly": [
+      "push esi",
+      "mov esi,[esp+8]        ; p",
+      "xor eax,eax            ; result = 0",
+      "mov cl,[esi]",
+      "inc esi",
+      "test cl,cl ; je end    ; empty string -> 0",
+      "mov edx,[esp+8]        ; ** edx = ORIGINAL POINTER, set once outside the loop **",
+      "loop:",
+      "  cmp cl,'0' ; jl notdec ; cmp cl,'9' ; jg notdec ; movsx edx,cl ; sub edx,0x30 ; jmp commit",
+      "  notdec: cmp cl,'a' ; jl notlow ; cmp cl,'f' ; jg notlow ; movsx edx,cl ; sub edx,0x57 ; jmp commit",
+      "  notlow: cmp cl,'A' ; jl notup ; cmp cl,'F' ; jg notup ; movsx edx,cl ; sub edx,0x37 ; jmp commit",
+      "  notup:  cmp cl,'X' ; je isx ; cmp cl,'x' ; jne end ; isx: xor eax,eax  ; ** 'x' clears eax but NOT edx **",
+      "  commit: mov cl,[esi] ; shl eax,4 ; add eax,edx ; inc esi ; test cl,cl ; jne loop",
+      "end: pop esi ; ret"
+    ],
+    "algorithm": "eax = eax*16 + digit, with an optional leading 0x/0X; stops at the first char outside [0-9a-fA-FxX]; no error signalling",
+    "accepts_0x_prefix": true,
+    "accepts_0X_prefix": true,
+    "accepts_bare_hex": true,
+    "skips_leading_whitespace": false,
+    "handles_sign": false,
+    "detects_overflow": false,
+    "reports_chars_consumed": false,
+    "boundary_table": [
+      {
+        "input": "0x1801a010",
+        "result": "0x1801a010",
+        "note": "standard form"
+      },
+      {
+        "input": "1801a010",
+        "result": "0x1801a010",
+        "note": "no prefix needed, pure hex"
+      },
+      {
+        "input": "0X1801A010",
+        "result": "0x1801a010",
+        "note": "upper X and upper digits fine"
+      },
+      {
+        "input": "0x1f",
+        "result": "0x1f",
+        "note": "short value ok"
+      },
+      {
+        "input": "0x",
+        "result": "0x0",
+        "note": "bare prefix returns 0"
+      },
+      {
+        "input": "0x0x10",
+        "result": "0x10",
+        "note": "repeated prefix is harmless"
+      },
+      {
+        "input": "0xABCdef",
+        "result": "0xabcdef",
+        "note": "mixed case ok"
+      },
+      {
+        "input": "1f ",
+        "result": "0x1f",
+        "note": "trailing space irrelevant"
+      },
+      {
+        "input": " 1f",
+        "result": "0x0",
+        "note": "LEADING space returns 0 -- no whitespace skipping"
+      },
+      {
+        "input": "-0x1f",
+        "result": "0x0",
+        "note": "no negative support"
+      },
+      {
+        "input": "+1",
+        "result": "0x0",
+        "note": "no positive-sign support"
+      },
+      {
+        "input": "0xzz",
+        "result": "0x0",
+        "note": "SILENT failure, no error"
+      },
+      {
+        "input": "0x1801g010",
+        "result": "0x1801",
+        "note": "SILENT truncation at the first bad char"
+      },
+      {
+        "input": "g1801a010",
+        "result": "0x0",
+        "note": "bad first char -> 0"
+      },
+      {
+        "input": "12g34",
+        "result": "0x12",
+        "note": "trailing 34 silently dropped"
+      },
+      {
+        "input": "0x100000000",
+        "result": "0x0",
+        "note": "33 bits wrap silently"
+      },
+      {
+        "input": "0x1FFFFFFFF",
+        "result": "0xffffffff",
+        "note": "wraps, no error"
+      },
+      {
+        "input": "0b101",
+        "result": "0xb101",
+        "note": "NOT binary -- 'b' is a valid hex digit"
+      },
+      {
+        "input": "010",
+        "result": "0x10",
+        "note": "NOT octal -- hex 16"
+      },
+      {
+        "input": "",
+        "result": "0x0",
+        "note": "empty string"
+      }
+    ],
+    "no_error_detection": "the caller cannot distinguish 'parsed to 0' from 'parse failed' -- both return 0",
+    "bug_leading_x_pointer_leak": {
+      "summary": "if the string STARTS with 'x'/'X' (without a leading '0'), edx still holds the original string pointer, so the result becomes pointer-derived garbage that varies with memory layout.",
+      "root_cause": "0x00404D6E `mov edx,[esp+8]` is the ONLY initialisation of edx and it sits outside the loop; the 'x' branch at 0x00404DB2 does `xor eax,eax` but does not touch edx, so the subsequent `add eax,edx` adds the pointer.",
+      "why_0x_is_safe": "in '0x10' the '0' digit first sets edx = 0, so when 'x' clears eax the following add is +0 and parsing continues cleanly.",
+      "demonstration": [
+        "'x10' @0x200000 -> 0x20000010",
+        "'x10' @0x400000 -> 0x40000010",
+        "'x10' @0x555000 -> 0x55500010",
+        "'x10' @0x7f0000 -> 0x7f000010"
+      ],
+      "self_healing": "the pointer contribution is shifted left 4 bits per character, so it is pushed out of 32 bits once 4 or more hex digits follow: 'x111' still varies but 'x1111' onwards is stable. Real addresses are 8 hex digits, which is why the bug never surfaced in the shipped files."
+    },
+    "tools": {
+      "spec/atoh_behaviour.py": "extracts the 98 bytes from boot_recovery.exe and EMULATES them with Unicorn across ~44 probe inputs",
+      "spec/atoh_reference.py": "pure-Python bit-exact model + differential test against the emulator (444/444 inputs agree: 44 hand-picked + 400 randomised)",
+      "env": "atoh_behaviour.py honours BOOT_RECOVERY_EXE; defaults to Desktop/key/boot_recovery.exe"
+    },
+    "practical_guidance": {
+      "for_hand_written_config": [
+        "always write full hex with the 0x prefix (e.g. 0x1801a010) -- it is the safest form",
+        "no spaces before a number (leading space yields 0)",
+        "no '-' or '+' signs",
+        "values are hex, never octal or binary: 010 == 16, 0b101 == 0xB101",
+        "a typo in the middle of a number silently truncates instead of failing -- double-check addresses",
+        "atoh converts one token; the positional structure is enforced by parse_line / FUN_00404810"
+      ]
+    }
+  }
+}

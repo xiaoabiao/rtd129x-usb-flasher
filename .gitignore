@@ -1,0 +1,18 @@
+# Rust build output
+/target/
+/dist/
+/packaging/build/
+/packaging/stage/
+
+# editor / OS noise
+.vs/
+.idea/
+*.user
+*.swp
+Thumbs.db
+desktop.ini
+
+# captures / local experiments
+*.pcap
+*.pcapng
+*.bin.bak

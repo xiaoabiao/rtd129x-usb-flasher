@@ -1,0 +1,15 @@
+* text=auto
+
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.sh  text eol=lf
+*.rs  text eol=lf
+*.md  text eol=lf
+
+*.bin binary
+*.zip binary
+*.exe binary
+*.png binary
+*.tar binary
+*.img binary
+*.pcap binary

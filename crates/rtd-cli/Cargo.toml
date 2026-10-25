@@ -1,0 +1,22 @@
+[package]
+name = "rtd-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Command line front end for the RTD129x USB download tool"
+
+[[bin]]
+name = "rtd-flash"
+path = "src/main.rs"
+
+[features]
+default = []
+# Forwarded to rtd-core: enables the real USB backend.
+usb = ["rtd-core/usb"]
+
+[dependencies]
+rtd-core = { path = "../rtd-core" }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

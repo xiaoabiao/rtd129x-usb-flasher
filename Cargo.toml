@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = ["crates/rtd-core", "crates/rtd-cli", "crates/rtd-gui"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/xiaoabiao/rtd129x-usb-flasher"
+description = "64-bit Rust reimplementation of the Realtek RTD129x USB download (line-flash) tool"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# --- checksums ---
+crc32fast = "1.4"
+# --- crypto (hwsetting is AES-128-ECB) ---
+aes = "0.8"
+cipher = "0.4"
+# --- tar (install.img / bootloader.tar / factory.tar are standard ustar) ---
+tar = "0.4"
+# --- errors / logging ---
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# --- encoding ---
+encoding_rs = "0.8"
+# --- misc ---
+byteorder = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+

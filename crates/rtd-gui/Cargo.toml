@@ -1,0 +1,38 @@
+[package]
+name = "rtd-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "GUI front end for the RTD129x USB download tool"
+
+[[bin]]
+name = "rtd-gui"
+path = "src/main.rs"
+
+[features]
+# USB is ON by default: the whole point of the GUI is to talk to a board, and
+# `nusb` builds everywhere. Shipping a UI-only binary by accident is a real
+# failure mode -- it looks fine until you press "扫描设备" -- so the default
+# must be the working configuration.
+# Use `--no-default-features` for a UI-only build.
+default = ["usb"]
+# Enable the real USB backend in the GUI.
+usb = ["rtd-core/usb"]
+# Enables eframe's built-in EFRAME_SCREENSHOT_TO capture, used by the
+# verification workflow (`./build.sh screenshot`).
+screenshot = ["eframe/__screenshot"]
+
+[dependencies]
+rtd-core = { path = "../rtd-core" }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+eframe = { version = "0.29", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.29"
+egui_extras = "0.29"
+rfd = "0.15"
+tar = "0.4"
+# Same font backend epaint uses; the `--font-debug` check parses with it so the
+# probe matches what the renderer will actually do.
+ab_glyph = "0.2"
